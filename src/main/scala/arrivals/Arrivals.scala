@@ -5,7 +5,6 @@ import akka.http.scaladsl.Http
 import akka.http.scaladsl.model.sse.ServerSentEvent
 import akka.http.scaladsl.model.{HttpEntity, HttpRequest, HttpResponse, Uri}
 import akka.stream.alpakka.sse.scaladsl.EventSource
-import scala.concurrent.Future
 import arrivals.AkkaStreamUtils
 import akka.stream.scaladsl._
 import akka.Done
@@ -14,6 +13,9 @@ import scala.concurrent.duration._
 import akka.stream.ThrottleMode
 import scala.collection.immutable
 import akka.http.scaladsl.model.headers.RawHeader
+import scala.util.{Try, Success, Failure}
+import scala.concurrent.{Await, Future}
+import scala.concurrent.duration.Duration
 
 object MBTA_Arrivals {
 
@@ -44,5 +46,8 @@ object MBTA_Arrivals {
       .throttle(elements = 1, per = 500.milliseconds, maximumBurst = 1, ThrottleMode.Shaping)
       .take(50)
       .runWith(Sink.seq)
+
+    val result = Await.ready(events, Duration.Inf).value.get
+    result.foreach(println)
   }
 }
