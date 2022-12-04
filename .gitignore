@@ -7,8 +7,9 @@ project/metals.sbt
 # vs code
 .vscode
 
-# scala 3
+# scala
 .tasty
+src/main/resources/application.conf
 
 # sbt
 project/project/
