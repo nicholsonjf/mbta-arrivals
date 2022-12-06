@@ -59,14 +59,14 @@ object MBTA_Arrivals {
         uri = Uri(conf.predictionsURI),
         sendHttp,
         initialLastEventId = Some("2"),
-        retryDelay = 1.second
+        retryDelay = 20.second
       )
 
     // Materialize events into a sequence of three events.
     val events: Future[immutable.Seq[ServerSentEvent]] =
     eventSource
       .throttle(elements = 1, per = 500.milliseconds, maximumBurst = 1, ThrottleMode.Shaping)
-      .take(3)
+      .take(1)
       .runWith(Sink.seq)
 
     // Wait for events to be ready, then print them to console.
