@@ -47,7 +47,7 @@ object MBTA_Arrivals {
     val responseFuture: Future[HttpResponse] = Http().singleRequest(req_with_headers)
     responseFuture
       .onComplete {
-        case Success(res) => println(res)
+        case Success(res) => res
         case Failure(_)   => sys.error("something wrong")
       }
     responseFuture
@@ -60,23 +60,13 @@ object MBTA_Arrivals {
       EventSource(
         uri = Uri(conf.predictionsURI),
         sendHttp,
-        initialLastEventId = None,
+        initialLastEventId = Some("2"),
         retryDelay = 10.second
       )
 
-    while(true) {
-      val feventSource = eventSource.throttle(elements = 1, per = 1.second, maximumBurst = 1, ThrottleMode.Shaping).take(10).runWith(Sink.seq)
+    eventSource.runForeach(serverEvent => println(serverEvent))
 
-      feventSource.foreach(
-        se => se.foreach(
-          ev => {
-            val event = ev.getData();
-            println("test")
-            println(ev);
-          }
-        )
-      )
-      while(!feventSource.isCompleted){}
-    }
+    val events = eventSource.throttle(1, 500.milliseconds, 5, ThrottleMode.Shaping).take(5).runWith(Sink.seq)
+    events.onComplete(ev => println(ev))
   }
 }
