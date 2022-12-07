@@ -30,6 +30,7 @@ case class ArrivalsAppConfig(
 object MBTA_Arrivals {
 
   // Make config implicit.
+  // predictions-uri = "https://stream.wikimedia.org/v2/stream/recentchange"
   implicit val conf = ConfigUtils.loadAppConfig[ArrivalsAppConfig]("arrivals")
 
   import AkkaStreamUtils.defaultActorSystem._
@@ -37,20 +38,14 @@ object MBTA_Arrivals {
   // Function required by EventSource to send http requests.
   def sendHttp(req: HttpRequest): Future[HttpResponse] = {
     // Add headers specific to MBTA API.
-    val req_with_headers = req.withHeaders(
-      List(
-        RawHeader("Accept", "text/event-stream"),
-        RawHeader("X-API-Key", conf.APIKey)
-      )
-    )
+    // val req_with_headers = req.withHeaders(
+    //   List(
+    //     RawHeader("Accept", "text/event-stream"),
+    //     RawHeader("X-API-Key", conf.APIKey)
+    //   )
+    // )
     // Send the request.
-    val responseFuture: Future[HttpResponse] = Http().singleRequest(req_with_headers)
-    responseFuture
-      .onComplete {
-        case Success(res) => res
-        case Failure(_)   => sys.error("something wrong")
-      }
-    responseFuture
+    Http().singleRequest(req)
   }
 
   def main(args: Array[String]): Unit = {
@@ -63,10 +58,10 @@ object MBTA_Arrivals {
         initialLastEventId = Some("2"),
         retryDelay = 10.second
       )
+    while(true) {
 
-    eventSource.runForeach(serverEvent => println(serverEvent))
-
-    val events = eventSource.throttle(1, 500.milliseconds, 5, ThrottleMode.Shaping).take(5).runWith(Sink.seq)
-    events.onComplete(ev => println(ev))
+      val events = eventSource.throttle(1, 500.milliseconds, 5, ThrottleMode.Shaping).take(5).runWith(Sink.seq)
+      events.onComplete(ev => println(ev))
+    }
   }
 }
