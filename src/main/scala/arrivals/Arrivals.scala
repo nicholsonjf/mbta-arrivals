@@ -19,6 +19,8 @@ import scala.concurrent.{Await, Future}
 import scala.concurrent.duration.Duration
 import com.typesafe.scalalogging.{LazyLogging}
 
+import scala.jdk.CollectionConverters._
+
 // App config case class.
 case class ArrivalsAppConfig(
   predictionsURI: String,
@@ -58,19 +60,23 @@ object MBTA_Arrivals {
       EventSource(
         uri = Uri(conf.predictionsURI),
         sendHttp,
-        initialLastEventId = Some("2"),
-        retryDelay = 20.second
+        initialLastEventId = None,
+        retryDelay = 10.second
       )
 
-    // Materialize events into a sequence of three events.
-    val events: Future[immutable.Seq[ServerSentEvent]] =
-    eventSource
-      .throttle(elements = 1, per = 500.milliseconds, maximumBurst = 1, ThrottleMode.Shaping)
-      .take(1)
-      .runWith(Sink.seq)
+    while(true) {
+      val feventSource = eventSource.throttle(elements = 1, per = 1.second, maximumBurst = 1, ThrottleMode.Shaping).take(10).runWith(Sink.seq)
 
-    // Wait for events to be ready, then print them to console.
-    val result = Await.ready(events, Duration.Inf).value.get
-    result.foreach(println)
+      feventSource.foreach(
+        se => se.foreach(
+          ev => {
+            val event = ev.getData();
+            println("test")
+            println(ev);
+          }
+        )
+      )
+      while(!feventSource.isCompleted){}
+    }
   }
 }
