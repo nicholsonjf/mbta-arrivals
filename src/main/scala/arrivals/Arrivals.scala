@@ -8,6 +8,7 @@ import akka.stream.alpakka.sse.scaladsl.EventSource
 import arrivals.{AkkaStreamUtils, ConfigUtils}
 import pureconfig.generic.auto._
 import akka.stream.scaladsl._
+import akka.stream._
 import akka.Done
 import akka.NotUsed
 import scala.concurrent.duration._
@@ -19,12 +20,17 @@ import scala.concurrent.{Await, Future}
 import scala.concurrent.duration.Duration
 import com.typesafe.scalalogging.{LazyLogging}
 
+import java.nio.file.Paths
+import akka.stream.scaladsl.Framing
+import akka.util.ByteString
+
 import scala.jdk.CollectionConverters._
 
 // App config case class.
 case class ArrivalsAppConfig(
   predictionsURI: String,
-  APIKey: String
+  APIKey: String,
+  eventsFilePath: String
 )
 
 object MBTA_Arrivals {
@@ -36,32 +42,22 @@ object MBTA_Arrivals {
   import AkkaStreamUtils.defaultActorSystem._
 
   // Function required by EventSource to send http requests.
-  def sendHttp(req: HttpRequest): Future[HttpResponse] = {
-    // Add headers specific to MBTA API.
-    // val req_with_headers = req.withHeaders(
-    //   List(
-    //     RawHeader("Accept", "text/event-stream"),
-    //     RawHeader("X-API-Key", conf.APIKey)
-    //   )
-    // )
-    // Send the request.
-    Http().singleRequest(req)
+  def rawDataStream(path: String): Source[ByteString, Future[IOResult]] = {
+
+    val file = Paths.get(path)
+
+    val ioRes: Source[ByteString, Future[IOResult]] = FileIO.fromPath(file)
+
+    ioRes
   }
 
   def main(args: Array[String]): Unit = {
 
-    // Open the SSE connection and create a source from received events.
-    val eventSource: Source[ServerSentEvent, NotUsed] =
-      EventSource(
-        uri = Uri(conf.predictionsURI),
-        sendHttp,
-        initialLastEventId = Some("2"),
-        retryDelay = 10.second
-      )
-    while(true) {
+    val fEvents: Source[ByteString, Future[IOResult]] = rawDataStream(conf.eventsFilePath)
 
-      val events = eventSource.throttle(1, 500.milliseconds, 5, ThrottleMode.Shaping).take(5).runWith(Sink.seq)
-      events.onComplete(ev => println(ev))
-    }
+    val linesStream = fEvents
+      .via(Framing.delimiter(ByteString("\n"), maximumFrameLength = 10000, allowTruncation = true))
+      .map(_.utf8String)
+      .runForeach(println(_))
   }
 }
