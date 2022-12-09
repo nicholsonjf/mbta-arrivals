@@ -23,6 +23,7 @@ import com.typesafe.scalalogging.{LazyLogging}
 import java.nio.file.Paths
 import akka.stream.scaladsl.Framing
 import akka.util.ByteString
+import scala.util.Random
 
 import scala.jdk.CollectionConverters._
 
@@ -36,7 +37,6 @@ case class ArrivalsAppConfig(
 object MBTA_Arrivals {
 
   // Make config implicit.
-  // predictions-uri = "https://stream.wikimedia.org/v2/stream/recentchange"
   implicit val conf = ConfigUtils.loadAppConfig[ArrivalsAppConfig]("arrivals")
 
   import AkkaStreamUtils.defaultActorSystem._
@@ -53,11 +53,19 @@ object MBTA_Arrivals {
 
   def main(args: Array[String]): Unit = {
 
-    val fEvents: Source[ByteString, Future[IOResult]] = rawDataStream(conf.eventsFilePath)
+    val eSource: Source[ByteString, Future[IOResult]] = 
+      rawDataStream(conf.eventsFilePath)
 
-    val linesStream = fEvents
-      .via(Framing.delimiter(ByteString("\n"), maximumFrameLength = 10000, allowTruncation = true))
-      .map(_.utf8String)
-      .runForeach(println(_))
+    val eFlow = 
+      Flow[ByteString]
+        .via(Framing.delimiter(delimiter = ByteString(System.lineSeparator), maximumFrameLength = 10000, allowTruncation = true))
+        .map(byteString => byteString.utf8String)
+        .throttle(elements = 1, per = 1.second, maximumBurst = 1, mode = ThrottleMode.shaping)
+
+    val eSink = Sink.foreach(println)
+
+    val f = eSource.via(eFlow).runWith(eSink)
+
+    Await.result(f, 10.seconds)
   }
 }
