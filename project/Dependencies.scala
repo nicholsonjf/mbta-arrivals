@@ -14,6 +14,8 @@ object Dependencies {
     "com.typesafe.scala-logging" %% "scala-logging" % "3.9.2",
     "ch.qos.logback" % "logback-classic" % "1.2.3",
     "com.github.pureconfig" %% "pureconfig" % pureconfigVersion,
-    "io.spray" %%  "spray-json" % "1.3.6"
+    "io.spray" %%  "spray-json" % "1.3.6",
+    "com.lightbend.akka" %% "akka-stream-alpakka-slick" % "5.0.0",
+    "mysql" % "mysql-connector-java" % "6.0.6"
   )
 }

@@ -33,6 +33,9 @@ import java.time.LocalDateTime
 import akka.stream.alpakka.slick.scaladsl._
 import akka.stream.scaladsl._
 import slick.jdbc.GetResult
+import slick.basic.DatabaseConfig
+import slick.jdbc.JdbcProfile
+import slick.lifted.Tag
 
 // App config case class.
 case class ArrivalsAppConfig(
@@ -42,11 +45,15 @@ case class ArrivalsAppConfig(
 )
 
 object MBTA_Arrivals {
+  val databaseConfig = DatabaseConfig.forConfig[JdbcProfile]("slick-mysql")
+  implicit val session = SlickSession.forConfig(databaseConfig)
+  import session.profile.api._
 
   // Make config implicit.
   implicit val conf = ConfigUtils.loadAppConfig[ArrivalsAppConfig]("arrivals")
 
   import AkkaStreamUtils.defaultActorSystem._
+  import AkkaStreamUtils.defaultActorSystem
 
   // Function required by EventSource to send http requests.
   def rawDataStream(path: String): Source[ByteString, Future[IOResult]] = {
@@ -76,7 +83,24 @@ object MBTA_Arrivals {
     implicit val predictionFormat = jsonFormat3(Prediction)
   }
 
+  case class PredictionRow(id: String, orig_arrival_time: String, updated_arrival_time: String, stop: String)
+
+  class Predictions(tag: Tag) extends Table[PredictionRow](tag, "predictions") {
+    def id = column[String]("id", O.PrimaryKey)
+    def orig_arrival_time = column[String]("orig_arrival_time")
+    def updated_arrival_time = column[String]("updated_arrival_time")
+    def stop = column[String]("stop")
+    def * = (id, orig_arrival_time, updated_arrival_time, stop).mapTo[PredictionRow]
+  }
+
+  val typedPredictions = TableQuery[Predictions]
+
+  def insertPrediction(prediction: PredictionRow): DBIO[Int] = typedPredictions += prediction
+
   def main(args: Array[String]): Unit = {
+
+    val predictions = TableQuery[Predictions]
+
     import MyJsonProtocol._
 
     val eSource: Source[ByteString, Future[IOResult]] = 
@@ -93,8 +117,15 @@ object MBTA_Arrivals {
         val ast = bs.parseJson
         val prediction = ast.convertTo[Prediction]
         val timestamp = prediction.attributes.arrival_time.replace("T", " ")
-        val prediction_wts = prediction.copy(attributes = Attributes_1(arrival_time = timestamp))
-        println(prediction_wts)
+        val pwts = prediction.copy(attributes = Attributes_1(arrival_time = timestamp))
+        val prediction_row = PredictionRow(
+          id = pwts.id,
+          orig_arrival_time = pwts.attributes.arrival_time,
+          updated_arrival_time = "",
+          stop = pwts.relationships.stop.data.id
+        )
+        println(prediction_row)
+        prediction_row
     })
 
     val f = eSource.via(eFlow).runWith(eSink)
