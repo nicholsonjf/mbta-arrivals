@@ -27,6 +27,12 @@ import scala.util.Random
 
 import scala.jdk.CollectionConverters._
 import spray.json._
+import java.time.format.DateTimeFormatter
+import java.time.LocalDateTime
+
+import akka.stream.alpakka.slick.scaladsl._
+import akka.stream.scaladsl._
+import slick.jdbc.GetResult
 
 // App config case class.
 case class ArrivalsAppConfig(
@@ -86,7 +92,9 @@ object MBTA_Arrivals {
       (bs: String) =>
         val ast = bs.parseJson
         val prediction = ast.convertTo[Prediction]
-        println(prediction.id)
+        val timestamp = prediction.attributes.arrival_time.replace("T", " ")
+        val prediction_wts = prediction.copy(attributes = Attributes_1(arrival_time = timestamp))
+        println(prediction_wts)
     })
 
     val f = eSource.via(eFlow).runWith(eSink)
