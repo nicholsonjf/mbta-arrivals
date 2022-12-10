@@ -44,7 +44,10 @@ case class ArrivalsAppConfig(
   eventsFilePath: String
 )
 
+// Main app object
 object MBTA_Arrivals {
+
+  // Database connection config
   val databaseConfig = DatabaseConfig.forConfig[JdbcProfile]("slick-mysql")
   implicit val session = SlickSession.forConfig(databaseConfig)
   import session.profile.api._
@@ -52,10 +55,11 @@ object MBTA_Arrivals {
   // Make config implicit.
   implicit val conf = ConfigUtils.loadAppConfig[ArrivalsAppConfig]("arrivals")
 
+  // Default Akka actor system
   import AkkaStreamUtils.defaultActorSystem._
   import AkkaStreamUtils.defaultActorSystem
 
-  // Function required by EventSource to send http requests.
+  // Creates an Akka source of lines from an input file.
   def rawDataStream(path: String): Source[ByteString, Future[IOResult]] = {
 
     val file = Paths.get(path)
@@ -65,6 +69,7 @@ object MBTA_Arrivals {
     ioRes
   }
 
+  // Case classes to create native types from JSON
   case class Prediction(attributes: Attributes_1, id: String, relationships: Relationships_1)
   case class Attributes_1(arrival_time: String)
   case class Relationships_1(stop: Stop_2)
@@ -73,6 +78,7 @@ object MBTA_Arrivals {
   case class Vehicle_2(data: VehicleData_3)
   case class VehicleData_3(id: String)
 
+  // Create a native type from a string of JSON
   object MyJsonProtocol extends DefaultJsonProtocol {
     implicit val vehicleData3Format = jsonFormat1(VehicleData_3)
     implicit val vehicle2Format = jsonFormat1(Vehicle_2)
@@ -83,8 +89,10 @@ object MBTA_Arrivals {
     implicit val predictionFormat = jsonFormat3(Prediction)
   }
 
+  // Represents a row in the predictions table
   case class PredictionRow(id: String, orig_arrival_time: String, updated_arrival_time: String, stop: String)
 
+  // Represents the predictions table
   class Predictions(tag: Tag) extends Table[PredictionRow](tag, "predictions") {
     def id = column[String]("id", O.PrimaryKey)
     def orig_arrival_time = column[String]("orig_arrival_time")
@@ -93,42 +101,45 @@ object MBTA_Arrivals {
     def * = (id, orig_arrival_time, updated_arrival_time, stop).mapTo[PredictionRow]
   }
 
+  // A query object on the predictions table
   val typedPredictions = TableQuery[Predictions]
 
+  // A function to insert predictions into the predictions table
   def insertPrediction(prediction: PredictionRow): DBIO[Int] = typedPredictions += prediction
 
+  // The main entry point
   def main(args: Array[String]): Unit = {
-
-    val predictions = TableQuery[Predictions]
 
     import MyJsonProtocol._
 
+    // A source of lines from the input text file
     val eSource: Source[ByteString, Future[IOResult]] = 
       rawDataStream(conf.eventsFilePath)
 
+    // A flow that processes the lines from the file and transforms them to PredictionRow objects
     val eFlow = 
       Flow[ByteString]
         .via(Framing.delimiter(delimiter = ByteString(System.lineSeparator), maximumFrameLength = 10000, allowTruncation = true))
-        .map(byteString => byteString.utf8String)
+        .map(byteString => {
+          val bs = byteString.utf8String
+          val ast = bs.parseJson
+          val prediction = ast.convertTo[Prediction]
+          val timestamp = prediction.attributes.arrival_time.replace("T", " ")
+          val pwts = prediction.copy(attributes = Attributes_1(arrival_time = timestamp))
+          val prediction_row = PredictionRow(
+            id = pwts.id,
+            orig_arrival_time = pwts.attributes.arrival_time,
+            updated_arrival_time = "",
+            stop = pwts.relationships.stop.data.id
+          )
+          println(prediction_row)
+          prediction_row
+        })
         .throttle(elements = 1, per = 1.second, maximumBurst = 1, mode = ThrottleMode.shaping)
 
-    val eSink = Sink.foreach({
-      (bs: String) =>
-        val ast = bs.parseJson
-        val prediction = ast.convertTo[Prediction]
-        val timestamp = prediction.attributes.arrival_time.replace("T", " ")
-        val pwts = prediction.copy(attributes = Attributes_1(arrival_time = timestamp))
-        val prediction_row = PredictionRow(
-          id = pwts.id,
-          orig_arrival_time = pwts.attributes.arrival_time,
-          updated_arrival_time = "",
-          stop = pwts.relationships.stop.data.id
-        )
-        println(prediction_row)
-        prediction_row
-    })
 
-    val f = eSource.via(eFlow).runWith(eSink)
+    // Run the stream, inserting predictions into the table
+    val f = eSource.via(eFlow).runWith(Slick.sink(insertPrediction))
 
     Await.result(f, 10.seconds)
   }
