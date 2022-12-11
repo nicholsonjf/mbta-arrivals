@@ -27,6 +27,7 @@ import scala.util.Random
 
 import scala.jdk.CollectionConverters._
 import spray.json._
+import scala.collection.mutable
 
 // App config case class.
 case class ArrivalsAppConfig(
@@ -52,9 +53,15 @@ object MBTA_Arrivals {
     ioRes
   }
 
+  implicit var pmap = mutable.Map.empty[String, Prediction]
+
+  def updatePrediction(prediction: Prediction)(implicit predictionMap: mutable.Map[String, Prediction]): Unit = {
+
+  }
+
   case class Prediction(attributes: Attributes_1, id: String, relationships: Relationships_1)
   case class Attributes_1(arrival_time: String)
-  case class Relationships_1(stop: Stop_2)
+  case class Relationships_1(stop: Stop_2, vehicle: Vehicle_2)
   case class Stop_2(data: StopData_3)
   case class StopData_3(id: String)
   case class Vehicle_2(data: VehicleData_3)
@@ -65,7 +72,7 @@ object MBTA_Arrivals {
     implicit val vehicle2Format = jsonFormat1(Vehicle_2)
     implicit val stopData3Format = jsonFormat1(StopData_3)
     implicit val stop2Format = jsonFormat1(Stop_2)
-    implicit val relationships1Format = jsonFormat1(Relationships_1)
+    implicit val relationships1Format = jsonFormat2(Relationships_1)
     implicit val attributes1Format = jsonFormat1(Attributes_1)
     implicit val predictionFormat = jsonFormat3(Prediction)
   }
@@ -86,11 +93,20 @@ object MBTA_Arrivals {
       (bs: String) =>
         val ast = bs.parseJson
         val prediction = ast.convertTo[Prediction]
-        println(prediction.id)
+        val vehicle_id = prediction.relationships.vehicle.data.id
+        val stop_id = prediction.relationships.stop.data.id
+        val prediction_exists = pmap.contains(prediction.id)
+        if (prediction_exists) {
+          updatePrediction(prediction)
+        } else {
+          pmap += (prediction.id -> prediction)
+          println(s"Train $vehicle_id will arrive at stop $stop_id at ${prediction.attributes.arrival_time}")
+        }
     })
 
     val f = eSource.via(eFlow).runWith(eSink)
 
     Await.result(f, 10.seconds)
+    println(pmap)
   }
 }
