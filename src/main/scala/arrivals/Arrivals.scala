@@ -28,6 +28,10 @@ import scala.util.Random
 import scala.jdk.CollectionConverters._
 import spray.json._
 import scala.collection.mutable
+import java.time._
+import java.time.format.DateTimeFormatter
+import java.time.temporal.ChronoUnit.SECONDS
+import scala.math._
 
 // App config case class.
 case class ArrivalsAppConfig(
@@ -55,8 +59,18 @@ object MBTA_Arrivals {
 
   implicit var pmap = mutable.Map.empty[String, Prediction]
 
-  def updatePrediction(prediction: Prediction)(implicit predictionMap: mutable.Map[String, Prediction]): Unit = {
-
+  def updatePrediction(new_prediction: Prediction, orig_prediction: Prediction)(implicit predictionMap: mutable.Map[String, Prediction]): Unit = {
+    val vehicle_id = orig_prediction.relationships.vehicle.data.id
+    val orig_arrival_time = LocalDateTime.parse(orig_prediction.attributes.arrival_time, DateTimeFormatter.ISO_DATE_TIME)
+    val new_arrival_time = LocalDateTime.parse(new_prediction.attributes.arrival_time, DateTimeFormatter.ISO_DATE_TIME)
+    val difference = orig_arrival_time.until(new_arrival_time, SECONDS);
+    val abs_difference = abs(difference)
+    difference match {
+      case i: Long if i > 0 => println(s"Train $vehicle_id is running $abs_difference seconds late")
+      case j: Long if j < 0 => println(s"Train $vehicle_id is running $abs_difference seconds early")
+      case _ => ()
+    }
+    pmap.update(orig_prediction.id, new_prediction)
   }
 
   case class Prediction(attributes: Attributes_1, id: String, relationships: Relationships_1)
@@ -77,6 +91,31 @@ object MBTA_Arrivals {
     implicit val predictionFormat = jsonFormat3(Prediction)
   }
 
+  def validPrediction(prediction: Prediction): Option[Prediction] = {
+    val hasId = prediction.id.size > 0
+    val hasArrivalTime = prediction.attributes.arrival_time.size > 0
+    val hasStop = prediction.relationships.stop.data.id.size > 0
+    val hasVehicle = prediction.relationships.vehicle.data.id.size > 0
+    val isValid = hasId && hasArrivalTime && hasStop && hasVehicle
+    isValid match {
+      case true => Some(prediction)
+      case false => None
+    }
+  }
+
+  def handlePrediction(prediction: Prediction): Unit = {
+    val vehicle_id = prediction.relationships.vehicle.data.id
+    val stop_id = prediction.relationships.stop.data.id
+    val orig_prediction = pmap.get(prediction.id)
+    orig_prediction match {
+      case None => {
+        pmap += (prediction.id -> prediction)
+        println(s"Train $vehicle_id will arrive at stop $stop_id at ${prediction.attributes.arrival_time}")
+      }
+      case Some(op) => updatePrediction(prediction, op)
+    }
+  }
+
   def main(args: Array[String]): Unit = {
     import MyJsonProtocol._
 
@@ -93,20 +132,16 @@ object MBTA_Arrivals {
       (bs: String) =>
         val ast = bs.parseJson
         val prediction = ast.convertTo[Prediction]
-        val vehicle_id = prediction.relationships.vehicle.data.id
-        val stop_id = prediction.relationships.stop.data.id
-        val prediction_exists = pmap.contains(prediction.id)
-        if (prediction_exists) {
-          updatePrediction(prediction)
-        } else {
-          pmap += (prediction.id -> prediction)
-          println(s"Train $vehicle_id will arrive at stop $stop_id at ${prediction.attributes.arrival_time}")
+        val valid_prediction = validPrediction(prediction)
+        valid_prediction match {
+          case Some(p) => handlePrediction(p)
+          case _ => ()
         }
     })
 
     val f = eSource.via(eFlow).runWith(eSink)
 
-    Await.result(f, 10.seconds)
-    println(pmap)
+    Await.result(f, Duration.Inf)
+
   }
 }
